@@ -1,0 +1,159 @@
+<?php
+/**
+ * @file transition_project_massage.module
+ *
+ * Transition Project Massage module gets field data, collates it nicely and
+ * saves to another field for each project.
+ *
+ * Inspired by: http://batayneh.me/post/rebuild-drupal-6-nodes-using-batch-api
+ *
+ * @author: Jim Kirkpatrick <jim@i-jk.co.uk>
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function transition_project_massage_menu() {
+  $items['admin/content/node/project-massage'] = array(
+    'title' => t('Massage Project Profile node data'),
+    'description' => t('Loads each Project Profile in turn and copies old field values into new field.'),
+    'page callback' => 'drupal_get_form',
+      'page arguments' => array('transition_project_massage_admin_form'),
+    'access arguments' => array('administer content'),
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_form().
+ *
+ * Builds the admin form to begin processing the Project nodes
+ */
+function transition_project_massage_admin_form() {
+  $form = array();
+  $form['dry-run'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Dry run'),
+    '#description' => t('When checked will run through process but do not save data.'),
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Massage projects'),
+  );
+  return $form;
+}
+
+/**
+ * Implements hook_form_submit().
+ *
+ * Builds batch for BatchAPI and kicks off processing
+ */
+function transition_project_massage_admin_form_submit($form, &$form_state) {
+  // Create an array which contains an array of the operations to
+  // perform and a method to call when the operations are all finished
+  $batch = array(
+    'title' => t('Massaging Project Profile nodes'),
+    'operations' =>  array(
+      array('transition_project_massage_batch_do', array()),
+    ),
+    'finished' => 'transition_project_massage_batch_finished',
+    'init_message' => t('Limbering up...'),
+    'progress_message' => t('Massage task @total.'),
+  );
+  batch_set($batch);
+}
+
+/**
+ * Callback for each operation in batch
+ *
+ * @see transition_project_massage_admin_form_submit()
+ */
+function transition_project_massage_batch_do(&$context) {
+  if (empty($context['sandbox'])) {
+    // The $context array gathers batch context information about the execution (read),
+    // as well as 'return values' for the current operation (write)
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_node'] = 0;
+    $context['sandbox']['max'] = db_result(db_query("SELECT COUNT(DISTINCT nid) FROM {node} WHERE type = 'project_profile'"));
+  }
+
+  // Load $limit nodes per pass
+  $limit = 5;
+  $result = db_query_range("SELECT nid FROM {node} WHERE type = 'project_profile' AND  nid > %d ORDER BY nid ASC", $context['sandbox']['current_node'], 0, $limit);
+  while ($row = db_fetch_array($result)) {
+    // load node, get details from various fields
+    $node = node_load($row['nid']);
+    $node->field_project_description[0]['value'] = transition_project_massage_details_collate($node);
+    // avoid this sending notifications, save
+    $node->notifications_content_disable = 1;
+    node_save($node);
+    // update tracking/sandbox
+    $context['results'][] = $node->nid .' : '. $node->title;
+    $context['sandbox']['progress']++;
+    $context['sandbox']['current_node'] = $node->nid;
+    $context['message'] = $node->title;
+  }
+  if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
+
+}
+
+/**
+ * Callback when batch finished
+ *
+ * @see transition_project_massage_admin_form_submit()
+ */
+function transition_project_massage_batch_finished($success, $results, $operations) {
+  if ($success) {
+    $message = count($results) . ' Project Profiles processed.';
+  }
+  else {
+    $error_operation = reset($operations);
+    $message = 'An error occurred while processing ' . $error_operation[0] . ' with arguments :' . print_r($error_operation[0], TRUE);
+  }
+  drupal_set_message($message);
+  return 'cheese';
+}
+
+function transition_project_massage_details_collate($node) {
+  $details = '';
+  /*Aims
+Inspiration
+Outcomes so far
+Unexpected outcomes
+Obstacles, and how we overcame them
+Lessons Learned
+Links and partnerships
+Sources of funding
+Sources of materials
+Further information
+*/
+  $details .= transition_project_massage_field_grab('Aims', $node->field_aim[0]['value']);
+  $details .= transition_project_massage_field_grab('Inspiration', $node->field_inspiration[0]['value']);
+  $details .= transition_project_massage_field_grab('Outcomes so far', $node->field_outcomes[0]['value']);
+  $details .= transition_project_massage_field_grab('Unexpected outcomes', $node->field_unexp[0]['value']);
+  $details .= transition_project_massage_field_grab('Obstacles, and how we overcame them', $node->field_obstacles[0]['value']);
+  $details .= transition_project_massage_field_grab('Lessons learned', $node->field_mistakes[0]['value']);
+  $details .= transition_project_massage_field_grab('Links and partnerships', $node->field_links[0]['value']);
+  $details .= transition_project_massage_field_grab('Sources of funding', $node->field_funding[0]['value']);
+  $details .= transition_project_massage_field_grab('Sources of materials', $node->field_materials[0]['value']);
+  $details .= transition_project_massage_field_grab('Further information', $node->body);
+  return $details;
+}
+
+/**
+ * Creates a section with $title for $content if has some non-html data in it.
+ *
+ * Should strictly be a theme() function, but this is quick and simple.
+ */
+function transition_project_massage_field_grab($title, $content) {
+  // remove &nbsp; and double spaces
+  $content = str_replace('&nbsp;', ' ', $content);
+  $content = str_replace('  ', ' ', str_replace('  ', ' ', $content));
+  // if we have something left longer than 3 chars, add a section for it.
+  $check = trim(strip_tags($content));
+  if (drupal_strlen($check) > 3) {
+    return '<p><strong>' . $title . ':</strong></p><p>' . $content . '</p>';
+  }
+}

@@ -1,0 +1,11 @@
+; $Id$
+name = "Transition Project Data Massage"
+description = "Moves and massages data from fields not required to a summary"
+package = "Transition Network"
+
+version = "6.x-1.0-alpha1"
+core = "6.x"
+
+dependencies[] = "content"
+dependencies[] = "node"
+dependencies[] = "system"
